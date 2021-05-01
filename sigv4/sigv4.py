@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import logging
 import os
+from collections import namedtuple
 from datetime import datetime
 
 import requests
@@ -15,14 +16,23 @@ logging.basicConfig(format='%(asctime)s %(levelname)5s %(message)s', level=loggi
 log = logging.getLogger(__name__)
 
 
+Service = namedtuple('Service', 'version get_host')
+SERVICES = {
+    'iam': Service('2010-05-08', lambda region: 'iam.amazonaws.com'),
+    'sts': Service('2011-06-15', lambda region: f'sts.{region}.amazonaws.com')
+}
+
 ALGORITHM = 'AWS4-HMAC-SHA256'
 
 
-def run(service, action, version, region, host,
+def run(service, action, params, region,
         access_key, secret_key, session_token=None,
         with_query_string=False, ssl_verify=True,
         content_type='application/x-www-form-urlencoded'):
-    qs = f'Action={action}&Version={version}' if with_query_string else ''
+    s = SERVICES[service]
+    host = s.get_host(region)
+
+    qs = build_query_string(action, s.version, params) if with_query_string else ''
     now = datetime.utcnow()
     amz_date = now.strftime('%Y%m%dT%H%M%SZ')
     datestamp = now.strftime('%Y%m%d')
@@ -137,13 +147,24 @@ def get_signature_key(key, datestamp, region_name, service_name):
     return k_signing
 
 
+def build_query_string(action, version, params):
+    all_params = {
+        'Action': action,
+        'Version': version
+    }
+    if params:
+        for x in params.split(';'):
+            k, v = x.split('=')
+            all_params[k] = v
+    return '&'.join(f'{x}={all_params[x]}' for x in sorted(all_params, key=str.lower))
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('service', type=str, help='iam for example')
     parser.add_argument('action', type=str, help='ListUsers for example')
-    parser.add_argument('version', type=str, help='2010-05-08 for IAM')
     parser.add_argument('region', type=str, help='us-east-1 for example')
-    parser.add_argument('host', type=str, help='iam.amazonaws.com for example')
+    parser.add_argument('--params', type=str, default='', help='key1=value1;key2=value2')
     parser.add_argument('-qs', action='store_true', help='Use query string')
     parser.add_argument('--no-ssl-verify', action='store_true', help='Disable SSL verification')
     parser.add_argument(
@@ -156,7 +177,7 @@ if __name__ == '__main__':
     creds_access_key = os.environ.get('AWS_ACCESS_KEY_ID')
     creds_secret_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
     creds_session_token = os.environ.get('AWS_SESSION_TOKEN')
-    run(args.service, args.action, args.version, args.region, args.host,
+    run(args.service, args.action, args.params, args.region,
         creds_access_key, creds_secret_key, creds_session_token,
         with_query_string=args.qs,
         ssl_verify=not args.no_ssl_verify,
