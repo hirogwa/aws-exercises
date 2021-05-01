@@ -28,11 +28,18 @@ ALGORITHM = 'AWS4-HMAC-SHA256'
 def run(service, action, params, region,
         access_key, secret_key, session_token=None,
         with_query_string=False, ssl_verify=True,
-        content_type='application/x-www-form-urlencoded'):
+        content_type=None):
     s = SERVICES[service]
     host = s.get_host(region)
 
-    qs = build_query_string(action, s.version, params) if with_query_string else ''
+    url_parameters = build_url_parameters(action, s.version, params)
+    if with_query_string:
+        qs = url_parameters
+        request_payload = ''
+    else:
+        qs = ''
+        request_payload = url_parameters
+
     now = datetime.utcnow()
     amz_date = now.strftime('%Y%m%dT%H%M%SZ')
     datestamp = now.strftime('%Y%m%d')
@@ -41,7 +48,6 @@ def run(service, action, params, region,
         'Host': host,
         'X-Amz-date': amz_date
     }
-    request_payload = ''
 
     # Task 1: Create a canonical request for Signature Version 4
     canonical_headers = create_canonical_headers(headers)
@@ -147,7 +153,7 @@ def get_signature_key(key, datestamp, region_name, service_name):
     return k_signing
 
 
-def build_query_string(action, version, params):
+def build_url_parameters(action, version, params):
     all_params = {
         'Action': action,
         'Version': version
@@ -167,9 +173,8 @@ if __name__ == '__main__':
     parser.add_argument('--params', type=str, default='', help='key1=value1;key2=value2')
     parser.add_argument('-qs', action='store_true', help='Use query string')
     parser.add_argument('--no-ssl-verify', action='store_true', help='Disable SSL verification')
-    parser.add_argument(
-        '--content-type', type=str, default='application/x-www-form-urlencoded',
-        help='iam.amazonaws.com for example')
+    parser.add_argument('--content-type', type=str, default='application/x-www-form-urlencoded')
+
 
     args = parser.parse_args()
     log.debug(args)
